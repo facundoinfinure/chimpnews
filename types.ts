@@ -31,6 +31,23 @@ export interface ViralMetadata {
   tags: string[];
 }
 
+export interface VideoAnalytics {
+  views: number;
+  ctr: number; // Click Through Rate percentage
+  avgViewDuration: string; // "0:45"
+  retentionData: number[]; // Array of percentages [100, 98, 90...]
+}
+
+export interface StoredVideo {
+  id: string;
+  created_at: string;
+  title: string;
+  description: string;
+  youtube_id: string | null;
+  viral_score: number;
+  analytics?: VideoAnalytics;
+}
+
 export enum AppState {
   LOGIN = 'LOGIN',
   ADMIN_DASHBOARD = 'ADMIN_DASHBOARD', // New State
@@ -82,7 +99,7 @@ export interface ChannelConfig {
   };
 }
 
-// Window augmentation for AI Studio key selection & Google Identity
+// Window augmentation for AI Studio key selection & Google Identity & Runtime Env
 declare global {
   interface AIStudio {
     hasSelectedApiKey: () => Promise<boolean>;
@@ -91,6 +108,14 @@ declare global {
 
   interface Window {
     webkitAudioContext: typeof AudioContext;
+    // Runtime environment variables injected by env.sh
+    env?: {
+      API_KEY?: string;
+      googlecloud_clientid?: string;
+      VITE_SUPABASE_URL?: string;
+      VITE_SUPABASE_ANON_KEY?: string;
+      ADMIN_EMAIL?: string;
+    };
     google?: {
       accounts: {
         oauth2: {

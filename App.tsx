@@ -1,13 +1,15 @@
 
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { BroadcastPlayer } from './components/BroadcastPlayer';
 import { NewsSelector } from './components/NewsSelector';
 import { AdminDashboard } from './components/AdminDashboard';
 import { fetchEconomicNews, generateScript, generateSegmentedAudio, generateBroadcastVisuals, generateViralMetadata } from './services/geminiService';
 import { initGoogleLogin, uploadVideoToYouTube } from './services/youtubeService';
+import { loadConfigFromDB, saveVideoToDB } from './services/supabaseService';
 import { NewsItem, AppState, BroadcastSegment, VideoAssets, ViralMetadata, UserProfile, ChannelConfig } from './types';
 
-const ADMIN_EMAIL = "facundo@infinure.com";
+// Runtime configuration access
+const getAdminEmail = () => window.env?.ADMIN_EMAIL || process.env.ADMIN_EMAIL || "facundo@infinure.com";
 
 // Default Configuration (ChimpNews)
 const DEFAULT_CONFIG: ChannelConfig = {
@@ -31,8 +33,8 @@ const DEFAULT_CONFIG: ChannelConfig = {
     hostB: {
       id: 'hostB',
       name: "Dani",
-      bio: "Male, Democrat-leaning, loves social safety nets, witty, optimistic, wears a blue suit",
-      visualPrompt: "Male chimpanzee news anchor wearing a blue suit and glasses",
+      bio: "Female, Democrat-leaning, loves social safety nets, witty, optimistic, wears a blue suit",
+      visualPrompt: "Female chimpanzee news anchor wearing a blue suit and glasses",
       voiceName: "Fenrir"
     }
   }
@@ -52,6 +54,7 @@ const App: React.FC = () => {
   const [videos, setVideos] = useState<VideoAssets>({ wide: null, hostA: [], hostB: [] });
   const [viralMeta, setViralMeta] = useState<ViralMetadata | null>(null);
   const [logs, setLogs] = useState<string[]>([]);
+  const [loginError, setLoginError] = useState<string | null>(null);
   
   // UI State
   const getYesterday = () => {
@@ -64,32 +67,55 @@ const App: React.FC = () => {
 
   const addLog = (msg: string) => setLogs(prev => [...prev, msg]);
 
+  // Load Config from DB on mount
+  useEffect(() => {
+    const initConfig = async () => {
+      const savedConfig = await loadConfigFromDB();
+      if (savedConfig) {
+        setConfig(savedConfig);
+        console.log("Configuration loaded from Supabase");
+      }
+    };
+    initConfig();
+  }, []);
+
   // LOGIN LOGIC
   const handleLogin = () => {
+    setLoginError(null);
+    const requiredEmail = getAdminEmail();
+
     const client = initGoogleLogin(
       (profile) => {
-        if (profile.email === ADMIN_EMAIL) {
+        if (profile.email === requiredEmail) {
           setUser(profile);
           setState(AppState.IDLE);
         } else {
-          alert(`Access Denied. User ${profile.email} is not authorized.`);
+          setLoginError(`Access Denied. User ${profile.email} is not authorized.`);
         }
       },
-      (err) => alert("Login Error: " + err)
+      (err) => {
+        setLoginError(err);
+      }
     );
     client?.requestAccessToken();
   };
 
   const verifyKeyAndStart = async () => {
     try {
-      const hasKey = await window.aistudio.hasSelectedApiKey();
-      if (!hasKey) {
-        addLog("Requesting API Key selection...");
-        await window.aistudio.openSelectKey();
-      }
+      // Check if running in AI Studio environment
+      if (window.aistudio) {
+          const hasKey = await window.aistudio.hasSelectedApiKey();
+          if (!hasKey) {
+            addLog("Requesting API Key selection...");
+            await window.aistudio.openSelectKey();
+          }
+      } 
+      // Note: If using Cloud Run, the API key should be in window.env.API_KEY or process.env.API_KEY
+      
       initiateNewsSearch();
     } catch (e) {
       addLog("Error verifying API Key: " + (e as Error).message);
+      // Proceed anyway
       initiateNewsSearch(); 
     }
   };
@@ -156,9 +182,11 @@ const App: React.FC = () => {
         });
 
       const metaTask = generateViralMetadata(finalNews, config)
-        .then(meta => {
+        .then(async (meta) => {
            setViralMeta(meta);
            addLog("✅ SEO Metadata generated.");
+           // Save draft video record to Supabase
+           await saveVideoToDB(meta);
            return meta;
         });
 
@@ -186,6 +214,7 @@ const App: React.FC = () => {
         (percent) => setUploadStatus(`Uploading: ${Math.round(percent)}%`)
       );
       setUploadStatus("✅ Published! " + videoUrl);
+      
       window.open(videoUrl, '_blank');
     } catch (e) {
       setUploadStatus("❌ Upload Failed: " + (e as Error).message);
@@ -206,6 +235,12 @@ const App: React.FC = () => {
             <h1 className="text-4xl font-headline text-white mb-2">CHIMP<span className="text-yellow-500">NEWS</span></h1>
             <p className="text-gray-400 mb-8 font-mono text-sm tracking-widest uppercase">Restricted Access // Admin Only</p>
             
+            {loginError && (
+              <div className="bg-red-900/50 border border-red-500 text-red-200 text-xs p-3 rounded mb-4 w-full">
+                {loginError}
+              </div>
+            )}
+
             <button 
               onClick={handleLogin}
               className="bg-white text-black font-bold py-3 px-8 rounded-full flex items-center gap-3 hover:bg-gray-200 transition-transform hover:scale-105"
@@ -213,7 +248,7 @@ const App: React.FC = () => {
               <svg className="w-5 h-5" viewBox="0 0 24 24"><path fill="currentColor" d="M21.35 11.1h-9.17v2.73h6.51c-.33 3.81-3.5 5.44-6.5 5.44C8.51 19.27 5 15.68 5 11.23S8.51 3.18 12.18 3.18c2.69 0 4.28 1.29 5.3 2.29l2.2-2.2c-1.99-1.89-4.83-2.93-7.5-2.93C4.94.34 0 5.23 0 11.23s4.94 10.89 12.18 10.89c6.05 0 10.18-4.27 10.18-10.18 0-.57-.06-1.13-.13-1.66h-.88z"/></svg>
               Sign in with Google
             </button>
-            <p className="mt-4 text-xs text-gray-500">Authorized: {ADMIN_EMAIL}</p>
+            <p className="mt-4 text-xs text-gray-500">Authorized: {getAdminEmail()}</p>
          </div>
       </div>
     );

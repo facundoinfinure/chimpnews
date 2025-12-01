@@ -3,15 +3,15 @@ import { UserProfile, ViralMetadata } from "../types";
 
 // =============================================================================================
 // CONFIGURATION: GOOGLE CLOUD OAUTH CLIENT ID
-// 1. Create a project in Google Cloud Console (https://console.cloud.google.com/).
-// 2. Enable "YouTube Data API v3".
-// 3. Create OAuth Credentials (Web Application).
-// 4. Add your domain (or localhost) to "Authorized JavaScript origins".
-// 5. Paste the Client ID below inside the quotes.
 // =============================================================================================
-const MANUAL_CLIENT_ID = "890331838183-0omv0jmid44m3leb5rladr7831gm9644.apps.googleusercontent.com"; // <--- PASTE YOUR CLIENT ID HERE (e.g., "123456789-abc...apps.googleusercontent.com")
 
-const CLIENT_ID = process.env.GOOGLE_CLIENT_ID || MANUAL_CLIENT_ID; 
+// Priority: 
+// 1. Runtime Environment (Cloud Run - window.env)
+// 2. Build-time Environment (Vite - process.env)
+const getClientId = () => {
+    return window.env?.googlecloud_clientid || process.env.googlecloud_clientid || process.env.GOOGLE_CLIENT_ID;
+}
+
 const SCOPES = "https://www.googleapis.com/auth/youtube.upload https://www.googleapis.com/auth/userinfo.email https://www.googleapis.com/auth/userinfo.profile";
 
 export const initGoogleLogin = (onSuccess: (user: UserProfile) => void, onError: (err: string) => void) => {
@@ -20,8 +20,12 @@ export const initGoogleLogin = (onSuccess: (user: UserProfile) => void, onError:
     return null;
   }
 
+  const CLIENT_ID = getClientId();
+
+  console.log("Initializing Login with ClientID:", CLIENT_ID);
+
   if (!CLIENT_ID) {
-    onError("Missing Google Client ID. Please set process.env.GOOGLE_CLIENT_ID or paste it into services/youtubeService.ts");
+    onError("Missing Google Client ID. Please check Cloud Run environment variables (googlecloud_clientid).");
     return null;
   }
 
@@ -30,7 +34,8 @@ export const initGoogleLogin = (onSuccess: (user: UserProfile) => void, onError:
     scope: SCOPES,
     callback: async (tokenResponse: any) => {
       if (tokenResponse.error) {
-        onError(tokenResponse.error);
+        console.error("OAuth Error Response:", tokenResponse);
+        onError(`OAuth Error: ${tokenResponse.error} - ${tokenResponse.error_description || ''}`);
         return;
       }
 

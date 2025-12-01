@@ -2,7 +2,8 @@
 import { GoogleGenAI, Modality } from "@google/genai";
 import { NewsItem, ScriptLine, BroadcastSegment, VideoAssets, ViralMetadata, ChannelConfig } from "../types";
 
-const getAiClient = () => new GoogleGenAI({ apiKey: process.env.API_KEY });
+const getApiKey = () => window.env?.API_KEY || process.env.API_KEY || "";
+const getAiClient = () => new GoogleGenAI({ apiKey: getApiKey() });
 
 export const fetchEconomicNews = async (targetDate: Date | undefined, config: ChannelConfig): Promise<NewsItem[]> => {
   const ai = getAiClient();
@@ -225,7 +226,8 @@ const pollForVideo = async (operation: any): Promise<string> => {
     if (!operation.done) throw new Error("Video generation timed out");
     const videoUri = operation.response?.generatedVideos?.[0]?.video?.uri;
     if (!videoUri) throw new Error("No video URI");
-    return `${videoUri}&key=${process.env.API_KEY}`;
+    // Append Key here using the getter helper logic, not process.env directly
+    return `${videoUri}&key=${getApiKey()}`;
 };
 
 export const generateBroadcastVisuals = async (newsContext: string, config: ChannelConfig): Promise<VideoAssets> => {

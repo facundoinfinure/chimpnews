@@ -1,6 +1,7 @@
 
-import React, { useState } from 'react';
-import { ChannelConfig, CharacterProfile } from '../types';
+import React, { useState, useEffect } from 'react';
+import { ChannelConfig, CharacterProfile, StoredVideo } from '../types';
+import { fetchVideosFromDB, saveConfigToDB } from '../services/supabaseService';
 
 interface AdminDashboardProps {
   config: ChannelConfig;
@@ -62,13 +63,61 @@ const CharacterEditor: React.FC<{
   );
 };
 
+// Simple Line Chart Component using SVG
+const RetentionChart: React.FC<{ data: number[], color: string }> = ({ data, color }) => {
+    if (!data || data.length === 0) return <div className="h-32 flex items-center justify-center text-gray-500">No Data</div>;
+    
+    const height = 120;
+    const width = 300;
+    const max = 100;
+    
+    const points = data.map((val, idx) => {
+        const x = (idx / (data.length - 1)) * width;
+        const y = height - (val / max) * height;
+        return `${x},${y}`;
+    }).join(' ');
+
+    return (
+        <svg viewBox={`0 0 ${width} ${height}`} className="w-full h-full overflow-visible">
+            {/* Grid lines */}
+            <line x1="0" y1={height * 0.25} x2={width} y2={height * 0.25} stroke="#333" strokeDasharray="4" />
+            <line x1="0" y1={height * 0.5} x2={width} y2={height * 0.5} stroke="#333" strokeDasharray="4" />
+            <line x1="0" y1={height * 0.75} x2={width} y2={height * 0.75} stroke="#333" strokeDasharray="4" />
+            
+            {/* The Line */}
+            <polyline 
+                fill="none" 
+                stroke={color} 
+                strokeWidth="3" 
+                points={points} 
+                vectorEffect="non-scaling-stroke"
+            />
+            {/* Area under curve */}
+            <polygon 
+                fill={color} 
+                fillOpacity="0.1" 
+                points={`0,${height} ${points} ${width},${height}`} 
+            />
+        </svg>
+    );
+};
+
 export const AdminDashboard: React.FC<AdminDashboardProps> = ({ config, onUpdateConfig, onExit }) => {
   const [tempConfig, setTempConfig] = useState<ChannelConfig>(config);
   const [activeTab, setActiveTab] = useState<'insights' | 'settings'>('insights');
+  const [videos, setVideos] = useState<StoredVideo[]>([]);
+  const [selectedVideo, setSelectedVideo] = useState<StoredVideo | null>(null);
 
-  const handleSave = () => {
+  useEffect(() => {
+    if (activeTab === 'insights') {
+        fetchVideosFromDB().then(setVideos);
+    }
+  }, [activeTab]);
+
+  const handleSave = async () => {
     onUpdateConfig(tempConfig);
-    alert("Configuration Saved!");
+    await saveConfigToDB(tempConfig);
+    alert("Configuration Saved & Synced to Database!");
   };
 
   return (
@@ -105,50 +154,106 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ config, onUpdate
 
         {/* INSIGHTS TAB */}
         {activeTab === 'insights' && (
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-            <div className="col-span-1 md:col-span-3 bg-[#1a1a1a] p-6 rounded-xl border border-[#333]">
-               <h3 className="font-bold text-lg mb-4">Channel Performance (Last 30 Days)</h3>
-               <div className="h-40 flex items-end justify-between gap-2">
-                  {[40, 65, 30, 80, 55, 90, 45, 70, 60, 95].map((h, i) => (
-                    <div key={i} className="bg-blue-900/50 w-full rounded-t hover:bg-blue-600 transition-all relative group" style={{height: `${h}%`}}>
-                       <div className="absolute -top-8 left-1/2 -translate-x-1/2 bg-black text-xs px-2 py-1 rounded opacity-0 group-hover:opacity-100 whitespace-nowrap">
-                          {h * 123} views
-                       </div>
+          <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+            
+            {/* Sidebar: Video List */}
+            <div className="lg:col-span-1 bg-[#1a1a1a] rounded-xl border border-[#333] overflow-hidden flex flex-col h-[600px]">
+                <div className="p-4 border-b border-[#333] bg-[#222]">
+                    <h3 className="font-bold text-gray-200">Recent Productions</h3>
+                </div>
+                <div className="overflow-y-auto flex-1">
+                    {videos.map(vid => (
+                        <div 
+                            key={vid.id} 
+                            onClick={() => setSelectedVideo(vid)}
+                            className={`p-4 border-b border-[#333] cursor-pointer hover:bg-[#2a2a2a] transition-colors ${selectedVideo?.id === vid.id ? 'bg-[#2a2a2a] border-l-4 border-l-blue-500' : ''}`}
+                        >
+                            <h4 className="font-bold text-sm line-clamp-2 mb-1">{vid.title}</h4>
+                            <div className="flex justify-between text-xs text-gray-500">
+                                <span>{new Date(vid.created_at).toLocaleDateString()}</span>
+                                <span>{vid.analytics?.views.toLocaleString()} views</span>
+                            </div>
+                        </div>
+                    ))}
+                    {videos.length === 0 && (
+                        <div className="p-8 text-center text-gray-500 text-sm">No videos found in database.</div>
+                    )}
+                </div>
+            </div>
+
+            {/* Main: Detailed Analytics */}
+            <div className="lg:col-span-2 space-y-6">
+                {selectedVideo ? (
+                    <>
+                        {/* Summary Card */}
+                        <div className="bg-[#1a1a1a] p-6 rounded-xl border border-[#333]">
+                            <h2 className="text-xl font-bold mb-4 line-clamp-1" title={selectedVideo.title}>{selectedVideo.title}</h2>
+                            <div className="grid grid-cols-4 gap-4">
+                                <div className="bg-black/30 p-4 rounded-lg">
+                                    <div className="text-xs text-gray-400 uppercase">Views</div>
+                                    <div className="text-2xl font-bold text-white">{selectedVideo.analytics?.views.toLocaleString()}</div>
+                                </div>
+                                <div className="bg-black/30 p-4 rounded-lg">
+                                    <div className="text-xs text-gray-400 uppercase">Click-Through Rate</div>
+                                    <div className="text-2xl font-bold text-green-400">{selectedVideo.analytics?.ctr}%</div>
+                                </div>
+                                <div className="bg-black/30 p-4 rounded-lg">
+                                    <div className="text-xs text-gray-400 uppercase">Avg View Duration</div>
+                                    <div className="text-2xl font-bold text-white">{selectedVideo.analytics?.avgViewDuration}</div>
+                                </div>
+                                <div className="bg-black/30 p-4 rounded-lg">
+                                    <div className="text-xs text-gray-400 uppercase">Predicted Viral Score</div>
+                                    <div className="text-2xl font-bold text-yellow-500">{selectedVideo.viral_score}</div>
+                                </div>
+                            </div>
+                        </div>
+
+                        {/* Retention Graph */}
+                        <div className="bg-[#1a1a1a] p-6 rounded-xl border border-[#333] h-80 flex flex-col">
+                            <h3 className="font-bold text-gray-200 mb-4 flex justify-between">
+                                <span>Audience Retention</span>
+                                <span className="text-xs text-gray-400 font-normal">Typical performance range: 40-60%</span>
+                            </h3>
+                            <div className="flex-1 w-full relative">
+                                <div className="absolute left-0 top-0 bottom-0 w-8 flex flex-col justify-between text-xs text-gray-600">
+                                    <span>100%</span>
+                                    <span>50%</span>
+                                    <span>0%</span>
+                                </div>
+                                <div className="absolute left-10 right-0 top-0 bottom-0">
+                                    <RetentionChart 
+                                        data={selectedVideo.analytics?.retentionData || []} 
+                                        color={config.logoColor1 || "#FACC15"} 
+                                    />
+                                </div>
+                            </div>
+                            <div className="mt-2 text-center text-xs text-gray-500">Video Duration (Normalized)</div>
+                        </div>
+
+                        {/* Metadata Preview */}
+                        <div className="bg-[#1a1a1a] p-6 rounded-xl border border-[#333]">
+                             <h3 className="font-bold text-gray-200 mb-4">Metadata Analysis</h3>
+                             <div className="space-y-4">
+                                <div>
+                                    <div className="text-xs text-gray-500 uppercase mb-1">Description</div>
+                                    <p className="text-sm text-gray-300 font-mono bg-black/30 p-3 rounded">{selectedVideo.description}</p>
+                                </div>
+                                <div>
+                                    <div className="text-xs text-gray-500 uppercase mb-1">Tags</div>
+                                    <div className="flex flex-wrap gap-2">
+                                        {selectedVideo.tags?.map((tag, i) => (
+                                            <span key={i} className="text-xs bg-blue-900/40 text-blue-300 px-2 py-1 rounded">#{tag}</span>
+                                        ))}
+                                    </div>
+                                </div>
+                             </div>
+                        </div>
+                    </>
+                ) : (
+                    <div className="bg-[#1a1a1a] rounded-xl border border-[#333] h-full flex items-center justify-center text-gray-500">
+                        Select a video to view performance insights.
                     </div>
-                  ))}
-               </div>
-            </div>
-
-            <div className="bg-[#1a1a1a] p-6 rounded-xl border border-[#333]">
-               <h3 className="font-bold text-gray-400 text-xs uppercase mb-2">Total Views</h3>
-               <div className="text-4xl font-bold">1,240,593</div>
-               <div className="text-green-500 text-sm mt-1">↑ 12% vs last month</div>
-            </div>
-            
-            <div className="bg-[#1a1a1a] p-6 rounded-xl border border-[#333]">
-               <h3 className="font-bold text-gray-400 text-xs uppercase mb-2">Avg. Retention</h3>
-               <div className="text-4xl font-bold">84.2%</div>
-               <div className="text-green-500 text-sm mt-1">Top performing: "Sarcastic" tone</div>
-            </div>
-
-            <div className="bg-[#1a1a1a] p-6 rounded-xl border border-[#333]">
-               <h3 className="font-bold text-gray-400 text-xs uppercase mb-2">Viral Hit Rate</h3>
-               <div className="text-4xl font-bold">3/10</div>
-               <div className="text-gray-500 text-sm mt-1">Videos > 100k views</div>
-            </div>
-            
-            <div className="col-span-1 md:col-span-3 bg-[#1a1a1a] p-6 rounded-xl border border-[#333]">
-                <h3 className="font-bold text-lg mb-4">AI Improvements Suggestions</h3>
-                <ul className="space-y-3">
-                  <li className="flex items-start gap-3">
-                     <span className="text-yellow-500">💡</span>
-                     <span className="text-sm text-gray-300">Audience retention drops at 0:45 when using "Host B". Consider making their dialogue punchier or increasing cut speed.</span>
-                  </li>
-                  <li className="flex items-start gap-3">
-                     <span className="text-yellow-500">💡</span>
-                     <span className="text-sm text-gray-300">"Sarcastic" tone videos perform 40% better than "Serious" tone. Recommendation: Increase sarcasm setting.</span>
-                  </li>
-                </ul>
+                )}
             </div>
           </div>
         )}
